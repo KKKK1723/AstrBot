@@ -46,6 +46,10 @@ class ProviderAnthropic(Provider):
             api_key=self.chosen_api_key,
             timeout=self.timeout,
             base_url=self.base_url,
+            default_headers={
+                "anthropic-version": "2023-06-01",
+                "anthropic-client-name": "claude-code"
+            },
         )
 
         self.thinking_config = provider_config.get("anth_thinking_config", {})
