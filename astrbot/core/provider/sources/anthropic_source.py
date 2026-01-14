@@ -47,7 +47,7 @@ class ProviderAnthropic(Provider):
             base_url=self.base_url,
             default_headers={
                 "anthropic-version": "2023-06-01",
-                "anthropic-client-name": "claude-code"
+                "User-Agent": "claude-cli/2.0.65 (external, cli)"
             },
         )
 
@@ -132,7 +132,39 @@ class ProviderAnthropic(Provider):
                     },
                 )
             else:
-                new_messages.append(message)
+                # 处理 user 消息，转换图片格式
+                if isinstance(message.get("content"), list):
+                    converted_content = []
+                    for part in message["content"]:
+                        if part.get("type") == "image_url":
+                            # 转换 OpenAI 格式的图片为 Anthropic 格式
+                            logger.info(f"[DEBUG] Converting image_url to Anthropic format")
+                            image_url = part.get("image_url", {}).get("url", "")
+                            if image_url.startswith("data:"):
+                                # 解析 data URL: data:image/jpeg;base64,xxxxx
+                                try:
+                                    header, base64_data = image_url.split(",", 1)
+                                    media_type = header.split(":")[1].split(";")[0]
+                                    converted_content.append({
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": media_type,
+                                            "data": base64_data
+                                        }
+                                    })
+                                except Exception:
+                                    converted_content.append(part)
+                            else:
+                                converted_content.append(part)
+                        else:
+                            converted_content.append(part)
+                    new_messages.append({
+                        "role": message["role"],
+                        "content": converted_content
+                    })
+                else:
+                    new_messages.append(message)
 
         return system_prompt, new_messages
 
@@ -153,6 +185,7 @@ class ProviderAnthropic(Provider):
             token_usage.output = usage.output_tokens
 
     async def _query(self, payloads: dict, tools: ToolSet | None) -> LLMResponse:
+        logger.info(f"[DEBUG] Anthropic payloads: {payloads}")
         if tools:
             if tool_list := tools.get_func_desc_anthropic_style():
                 payloads["tools"] = tool_list
@@ -208,6 +241,7 @@ class ProviderAnthropic(Provider):
         payloads: dict,
         tools: ToolSet | None,
     ) -> AsyncGenerator[LLMResponse, None]:
+        logger.info(f"[DEBUG] Anthropic stream payloads: {payloads}")
         if tools:
             if tool_list := tools.get_func_desc_anthropic_style():
                 payloads["tools"] = tool_list
@@ -399,8 +433,20 @@ class ProviderAnthropic(Provider):
         payloads = {"messages": new_messages, "model": model}
 
         # Anthropic has a different way of handling system prompts
+        system_blocks = [
+            {
+                "type": "text",
+                "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+                "cache_control": {"type": "ephemeral"}
+            }
+        ]
         if system_prompt:
-            payloads["system"] = system_prompt
+            system_blocks.append({
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"}
+            })
+        payloads["system"] = system_blocks
 
         llm_response = None
         try:
@@ -455,8 +501,20 @@ class ProviderAnthropic(Provider):
         payloads = {"messages": new_messages, "model": model}
 
         # Anthropic has a different way of handling system prompts
+        system_blocks = [
+            {
+                "type": "text",
+                "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+                "cache_control": {"type": "ephemeral"}
+            }
+        ]
         if system_prompt:
-            payloads["system"] = system_prompt
+            system_blocks.append({
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"}
+            })
+        payloads["system"] = system_blocks
 
         async for llm_response in self._query_stream(payloads, func_tool):
             yield llm_response
